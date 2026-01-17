@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: acm
+  namespace: openshift-gitops
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ocppe/gitops-hub.git
+    targetRevision: main
+    path: operators/acm
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

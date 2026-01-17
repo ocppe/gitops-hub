@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rhacs-operator
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: stackrox
+  labels:
+    openshift.io/cluster-monitoring: "true"
