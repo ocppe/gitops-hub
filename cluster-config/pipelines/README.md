@@ -143,9 +143,14 @@ In your GitHub repository settings:
 
 1. Go to **Settings** → **Webhooks** → **Add webhook**
 2. **Payload URL**: `https://<webhook-route>/`
-3. **Content type**: `application/json`
+3. **Content type**: `application/json` (**IMPORTANT**: Must be `application/json`, NOT `application/x-www-form-urlencoded`)
 4. **Secret**: Use the `WEBHOOK_SECRET` value from AWS setup
-5. **Events**: Select "Just the push event" or "Pull requests"
+5. **SSL verification**: Enable
+6. **Events**: Select "Just the push event" or choose "Let me select individual events" and check:
+   - Push events (for branch pushes)
+   - Pull requests (for PR builds)
+
+**Common Error**: If you see `invalid character 'p' looking for beginning of value`, the Content-type is wrong. It must be `application/json`.
 
 ## Directory Structure
 
@@ -247,4 +252,21 @@ oc logs -l eventlistener=github-webhook-listener -n ci-pipelines
 
 # Verify webhook secret matches
 oc get secret github-webhook-secret -n ci-pipelines -o jsonpath='{.data.webhook-secret}' | base64 -d
+```
+
+### "Invalid character 'p' looking for beginning of value"
+
+This error means GitHub is sending the payload as URL-encoded form data instead of JSON.
+
+**Fix**: In GitHub webhook settings, change **Content type** from `application/x-www-form-urlencoded` to `application/json`.
+
+### Webhook Returns 403 Forbidden
+
+The webhook secret doesn't match. Verify:
+
+```shell
+# Get the secret from the cluster
+oc get secret github-webhook-secret -n ci-pipelines -o jsonpath='{.data.webhook-secret}' | base64 -d
+
+# Compare with the value in GitHub webhook settings
 ```

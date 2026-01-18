@@ -284,9 +284,12 @@ For each repository (customer-api, product-api, order-api):
 
 1. Go to **Settings** → **Webhooks** → **Add webhook**
 2. **Payload URL**: `https://<webhook-route-from-above>/`
-3. **Content type**: `application/json`
+3. **Content type**: `application/json` (**CRITICAL**: Must be `application/json`, NOT `application/x-www-form-urlencoded`)
 4. **Secret**: Same value as `github-webhook-secret` from AWS Secrets Manager
-5. **Events**: Select "Just the push event" or "Pull requests"
+5. **SSL verification**: Enable
+6. **Events**: Select "Just the push event" or "Pull requests"
+
+**Troubleshooting**: If you see error `invalid character 'p' looking for beginning of value`, the Content-type is set incorrectly.
 
 ### 4. Supported Application Types
 
