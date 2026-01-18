@@ -3,4 +3,4 @@ kind: Kustomization
 
 resources:
   - namespace.yaml
-  - secrets.yaml
+  - external-secrets.yaml

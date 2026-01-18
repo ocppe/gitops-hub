@@ -7,7 +7,15 @@ resources:
   - app-config.yaml
   - backstage.yaml
 
-# Update these values for your environment
+# Update these values for your environment:
+# 1. Replace sandbox2222 with your SANDBOX_ID
+# 2. Replace the secret value with the OAUTH_SECRET from AWS Secrets Manager
+#    (the same value stored in ocppe/developer-hub -> oauth-client-secret)
+#
+# Generate secrets:
+#   OAUTH_SECRET=$(openssl rand -base64 32)
+#   aws secretsmanager create-secret --name ocppe/developer-hub \
+#     --secret-string "{\"backend-secret\":\"...\",\"oauth-client-secret\":\"${OAUTH_SECRET}\"}"
 patches:
   - patch: |-
       - op: replace
@@ -15,7 +23,7 @@ patches:
         value: https://backstage-developer-hub-rhdh.apps.hub.ocp.sandbox2222.opentlc.com/api/auth/oidc/handler/frame
       - op: replace
         path: /secret
-        value: GENERATE_SECURE_SECRET_HERE
+        value: REPLACE_WITH_OAUTH_SECRET_FROM_AWS
     target:
       kind: OAuthClient
       name: developer-hub

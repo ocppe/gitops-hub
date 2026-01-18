@@ -34,7 +34,7 @@ gitops-hub/
 ├── cluster-config/
 │   ├── external-secrets/           # ClusterSecretStore for AWS
 │   └── pipelines/                  # CI pipeline configuration
-│       ├── base/                   # Namespace, RBAC, secrets
+│       ├── base/                   # Namespace, RBAC, ExternalSecrets
 │       ├── tasks/                  # Tekton tasks
 │       ├── pipelines/              # Tekton pipelines
 │       └── triggers/               # GitHub webhook triggers
@@ -45,7 +45,9 @@ gitops-hub/
 
 ### AWS Secrets Manager Setup
 
-Create the secret for Developer Hub in AWS Secrets Manager:
+All secrets are managed via External Secrets Operator syncing from AWS Secrets Manager. Create the following secrets before deploying:
+
+#### 1. Developer Hub Secrets
 
 ```shell
 # Generate secrets
@@ -55,10 +57,57 @@ OAUTH_SECRET=$(openssl rand -base64 32)
 # Create secret in AWS Secrets Manager
 aws secretsmanager create-secret \
   --name ocppe/developer-hub \
-  --secret-string "{\"backend-secret\":\"${BACKEND_SECRET}\",\"oauth-client-secret\":\"${OAUTH_SECRET}\"}"
+  --secret-string "{
+    \"backend-secret\": \"${BACKEND_SECRET}\",
+    \"oauth-client-secret\": \"${OAUTH_SECRET}\"
+  }"
 
-# Save the OAuth secret for the OAuthClient configuration
+# Save the OAuth secret for OAuthClient configuration
 echo "OAuth Client Secret: ${OAUTH_SECRET}"
+```
+
+#### 2. CI Pipeline Secrets
+
+```shell
+# Generate webhook secret
+WEBHOOK_SECRET=$(openssl rand -hex 20)
+
+# Create secret in AWS Secrets Manager
+aws secretsmanager create-secret \
+  --name ocppe/ci-pipelines \
+  --secret-string "{
+    \"github-webhook-secret\": \"${WEBHOOK_SECRET}\",
+    \"quay-username\": \"YOUR_QUAY_USERNAME\",
+    \"quay-password\": \"YOUR_QUAY_ROBOT_TOKEN\",
+    \"git-username\": \"YOUR_GITHUB_USERNAME\",
+    \"git-password\": \"YOUR_GITHUB_PAT\"
+  }"
+
+# Save the webhook secret for GitHub configuration
+echo "GitHub Webhook Secret: ${WEBHOOK_SECRET}"
+```
+
+#### Update Existing Secrets
+
+```shell
+# Update Developer Hub secrets
+aws secretsmanager put-secret-value \
+  --secret-id ocppe/developer-hub \
+  --secret-string "{
+    \"backend-secret\": \"${BACKEND_SECRET}\",
+    \"oauth-client-secret\": \"${OAUTH_SECRET}\"
+  }"
+
+# Update CI Pipeline secrets
+aws secretsmanager put-secret-value \
+  --secret-id ocppe/ci-pipelines \
+  --secret-string "{
+    \"github-webhook-secret\": \"${WEBHOOK_SECRET}\",
+    \"quay-username\": \"YOUR_QUAY_USERNAME\",
+    \"quay-password\": \"YOUR_QUAY_ROBOT_TOKEN\",
+    \"git-username\": \"YOUR_GITHUB_USERNAME\",
+    \"git-password\": \"YOUR_GITHUB_PAT\"
+  }"
 ```
 
 ### Configure Developer Hub
@@ -74,22 +123,6 @@ patches:
       - op: replace
         path: /secret
         value: <OAUTH_SECRET from above>
-```
-
-### Configure CI Pipeline Secrets
-
-Update `cluster-config/pipelines/base/secrets.yaml` with your credentials:
-
-```yaml
-# GitHub webhook secret - generate with: openssl rand -hex 20
-webhook-secret: "<your-webhook-secret>"
-
-# Quay.io credentials - generate with: echo -n 'username:token' | base64
-auth: "<base64-encoded-credentials>"
-
-# GitHub credentials for cloning private repos
-username: "<github-username>"
-password: "<github-pat>"
 ```
 
 ## Bootstrap Instructions
@@ -151,80 +184,9 @@ oc get route openshift-gitops-server -n openshift-gitops -o jsonpath='{.spec.hos
 oc extract secret/openshift-gitops-cluster -n openshift-gitops --to=-
 ```
 
-## CI Pipelines Setup
-
-### 1. Get the Webhook URL
-
-After the pipelines are deployed:
-
-```shell
-oc get route github-webhook -n ci-pipelines -o jsonpath='{.spec.host}'
-```
-
-### 2. Configure GitHub Webhooks
-
-For each repository (customer-api, product-api, order-api):
-
-1. Go to **Settings** → **Webhooks** → **Add webhook**
-2. **Payload URL**: `https://<webhook-route-from-above>/`
-3. **Content type**: `application/json`
-4. **Secret**: Same value as `webhook-secret` in secrets.yaml
-5. **Events**: Select "Just the push event" or "Pull requests"
-
-### 3. Supported Application Types
-
-| Type    | Detection            | Build                    | Image Location              |
-| ------- | -------------------- | ------------------------ | --------------------------- |
-| Quarkus | pom.xml with quarkus | Maven package            | quay.io/ocppe/<app-name>    |
-| Angular | angular.json         | (coming soon)            | quay.io/ocppe/<app-name>    |
-| Node.js | package.json         | (coming soon)            | quay.io/ocppe/<app-name>    |
-
-### 4. Manual Pipeline Run
-
-```shell
-cat <<EOF | oc create -f -
-apiVersion: tekton.dev/v1
-kind: PipelineRun
-metadata:
-  generateName: ci-pipeline-manual-
-  namespace: ci-pipelines
-spec:
-  pipelineRef:
-    name: ci-pipeline
-  params:
-    - name: git-url
-      value: https://github.com/ocppe/customer-api.git
-    - name: git-revision
-      value: main
-  workspaces:
-    - name: shared-workspace
-      volumeClaimTemplate:
-        spec:
-          accessModes:
-            - ReadWriteOnce
-          resources:
-            requests:
-              storage: 1Gi
-    - name: dockerconfig
-      secret:
-        secretName: quay-credentials
-  serviceAccountName: pipeline-sa
-EOF
-```
-
-### 5. View Pipeline Runs
-
-```shell
-# List runs
-oc get pipelineruns -n ci-pipelines
-
-# View logs (requires tkn CLI)
-tkn pipelinerun logs <run-name> -n ci-pipelines
-```
-
 ## External Secrets IAM Configuration
 
-The External Secrets Operator needs IAM permissions to access AWS Secrets Manager. Configure using IRSA (IAM Roles for Service Accounts):
+The External Secrets Operator needs IAM permissions to access AWS Secrets Manager.
 
 ### 1. Create IAM Policy
 
@@ -295,6 +257,98 @@ oc annotate serviceaccount external-secrets-sa \
   -n external-secrets-operator \
   eks.amazonaws.com/role-arn=arn:aws:iam::${AWS_ACCOUNT_ID}:role/ExternalSecretsRole
 ```
+
+## CI Pipelines Setup
+
+### 1. Verify External Secrets
+
+After deployment, verify the secrets are synced:
+
+```shell
+# Check ExternalSecret status
+oc get externalsecrets -n ci-pipelines
+
+# Verify secrets were created
+oc get secrets -n ci-pipelines
+```
+
+### 2. Get the Webhook URL
+
+```shell
+oc get route github-webhook -n ci-pipelines -o jsonpath='{.spec.host}'
+```
+
+### 3. Configure GitHub Webhooks
+
+For each repository (customer-api, product-api, order-api):
+
+1. Go to **Settings** → **Webhooks** → **Add webhook**
+2. **Payload URL**: `https://<webhook-route-from-above>/`
+3. **Content type**: `application/json`
+4. **Secret**: Same value as `github-webhook-secret` from AWS Secrets Manager
+5. **Events**: Select "Just the push event" or "Pull requests"
+
+### 4. Supported Application Types
+
+| Type    | Detection            | Build                    | Image Location              |
+| ------- | -------------------- | ------------------------ | --------------------------- |
+| Quarkus | pom.xml with quarkus | Maven package            | quay.io/ocppe/<app-name>    |
+| Angular | angular.json         | (coming soon)            | quay.io/ocppe/<app-name>    |
+| Node.js | package.json         | (coming soon)            | quay.io/ocppe/<app-name>    |
+
+### 5. Manual Pipeline Run
+
+```shell
+cat <<EOF | oc create -f -
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: ci-pipeline-manual-
+  namespace: ci-pipelines
+spec:
+  pipelineRef:
+    name: ci-pipeline
+  params:
+    - name: git-url
+      value: https://github.com/ocppe/customer-api.git
+    - name: git-revision
+      value: main
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+    - name: dockerconfig
+      secret:
+        secretName: quay-credentials
+  serviceAccountName: pipeline-sa
+EOF
+```
+
+### 6. View Pipeline Runs
+
+```shell
+# List runs
+oc get pipelineruns -n ci-pipelines
+
+# View logs (requires tkn CLI)
+tkn pipelinerun logs <run-name> -n ci-pipelines
+```
+
+## Secrets Reference
+
+All secrets are stored in AWS Secrets Manager under the `ocppe/` prefix:
+
+| AWS Secret Path       | Kubernetes Secret          | Namespace       | Purpose                    |
+| --------------------- | -------------------------- | --------------- | -------------------------- |
+| ocppe/developer-hub   | developer-hub-secrets      | rhdh            | Developer Hub OIDC/backend |
+| ocppe/ci-pipelines    | github-webhook-secret      | ci-pipelines    | GitHub webhook validation  |
+| ocppe/ci-pipelines    | quay-credentials           | ci-pipelines    | Container registry auth    |
+| ocppe/ci-pipelines    | git-credentials            | ci-pipelines    | Git clone authentication   |
 
 ## Manual Deployment (Without App-of-Apps)
 
