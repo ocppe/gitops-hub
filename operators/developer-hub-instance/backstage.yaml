@@ -6,7 +6,12 @@ metadata:
 spec:
   application:
     appConfig:
+      configMaps:
+        - name: developer-hub-app-config
       mountPath: /opt/app-root/src
+    extraEnvs:
+      secrets:
+        - name: developer-hub-secrets
     extraFiles:
       mountPath: /opt/app-root/src
     replicas: 1

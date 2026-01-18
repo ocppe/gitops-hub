@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: developer-hub-app-config
+  namespace: rhdh
+data:
+  app-config-rhdh.yaml: |
+    app:
+      title: Red Hat Developer Hub
+    signInPage: oidc
+    auth:
+      environment: production
+      providers:
+        oidc:
+          production:
+            clientId: developer-hub
+            clientSecret: ${OAUTH_CLIENT_SECRET}
+            metadataUrl: https://kubernetes.default.svc/.well-known/oauth-authorization-server
+            prompt: auto
+            scope: 'openid email profile'
+            signIn:
+              resolvers:
+                - resolver: preferredUsernameMatchingUserEntityName
+    catalog:
+      rules:
+        - allow: [Component, System, API, Resource, Location, Template]
