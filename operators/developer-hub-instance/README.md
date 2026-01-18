@@ -4,35 +4,35 @@ Backstage-based internal developer portal with OpenShift OIDC authentication.
 
 ## Overview
 
-This configuration deploys Red Hat Developer Hub with:
-
 - OpenShift OAuth integration for SSO
 - Secrets managed via External Secrets Operator from AWS Secrets Manager
 - Software catalog integration
 - TechDocs support
 
-## Prerequisites
+## Setup
 
-### 1. Create AWS Secrets
+Secrets are created automatically via Ansible:
 
 ```shell
-# Generate secrets
-BACKEND_SECRET=$(openssl rand -base64 32)
-OAUTH_SECRET=$(openssl rand -base64 32)
-
-# Create in AWS Secrets Manager
-aws secretsmanager create-secret \
-  --name ocppe/developer-hub \
-  --secret-string "{
-    \"backend-secret\": \"${BACKEND_SECRET}\",
-    \"oauth-client-secret\": \"${OAUTH_SECRET}\"
-  }"
-
-# Save OAuth secret - you'll need it for the kustomization patch
-echo "OAuth Client Secret: ${OAUTH_SECRET}"
+cd ansible
+ansible-playbook playbooks/aws-secrets-setup.yml \
+  -e quay_username=... \
+  -e quay_password=... \
+  -e git_username=... \
+  -e git_password=...
 ```
 
-### 2. Update kustomization.yaml
+After running, update `kustomization.yaml` with the OAuth secret:
+
+```shell
+source ../ansible/.secrets.env
+echo "OAuth Secret: $OAUTH_CLIENT_SECRET"
+# Update kustomization.yaml with this value
+```
+
+See [ansible/README.md](../../../../ansible/README.md) for complete instructions.
+
+## Configuration
 
 Edit `kustomization.yaml` to set your environment values:
 
@@ -44,7 +44,7 @@ patches:
         value: https://backstage-developer-hub-rhdh.apps.hub.ocp.sandbox${SANDBOX_ID}.opentlc.com/api/auth/oidc/handler/frame
       - op: replace
         path: /secret
-        value: <OAUTH_SECRET from step 1>
+        value: <OAUTH_CLIENT_SECRET from .secrets.env>
     target:
       kind: OAuthClient
       name: developer-hub
@@ -59,58 +59,33 @@ patches:
 | app-config.yaml      | Backstage configuration ConfigMap                   |
 | backstage.yaml       | Backstage CR for deploying Developer Hub            |
 
-## Secrets Reference
-
-The ExternalSecret syncs these values from `ocppe/developer-hub` in AWS Secrets Manager:
-
-| AWS Property         | K8s Secret Key     | Purpose                          |
-| -------------------- | ------------------ | -------------------------------- |
-| backend-secret       | BACKEND_SECRET     | Backstage backend session secret |
-| oauth-client-secret  | OAUTH_CLIENT_SECRET| OpenShift OAuth client secret    |
-
 ## Verify Deployment
 
 ```shell
-# Check ExternalSecret status
+# Check ExternalSecret
 oc get externalsecret developer-hub-secrets -n rhdh
-
-# Verify secret was created
-oc get secret developer-hub-secrets -n rhdh
 
 # Check Backstage deployment
 oc get backstage developer-hub -n rhdh
 
-# Get the route URL
+# Get route URL
 oc get route backstage-developer-hub -n rhdh -o jsonpath='{.spec.host}'
 ```
-
-## Access Developer Hub
-
-After deployment, access the Developer Hub at:
-
-```
-https://backstage-developer-hub-rhdh.apps.hub.ocp.sandbox${SANDBOX_ID}.opentlc.com
-```
-
-Login using your OpenShift credentials.
 
 ## Troubleshooting
 
 ### OAuth Login Fails
 
-1. Verify the OAuthClient secret matches the AWS secret:
-   ```shell
-   oc get oauthclient developer-hub -o jsonpath='{.secret}'
-   ```
+```shell
+# Verify OAuthClient secret
+oc get oauthclient developer-hub -o jsonpath='{.secret}'
 
-2. Check the redirect URI matches your cluster domain
+# Check redirect URI matches cluster domain
+```
 
 ### Backstage Not Starting
 
 ```shell
-# Check pod logs
 oc logs -n rhdh -l app.kubernetes.io/name=backstage
-
-# Verify secrets are synced
 oc describe externalsecret developer-hub-secrets -n rhdh
 ```

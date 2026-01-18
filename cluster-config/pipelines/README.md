@@ -4,8 +4,6 @@ Centralized Tekton pipelines for building, testing, and containerizing applicati
 
 ## Overview
 
-This setup provides:
-
 - **GitHub webhook integration** via Tekton Triggers
 - **Auto-detection** of application type (Quarkus, Angular, Node.js)
 - **Build, test, and containerize** workflow
@@ -46,111 +44,30 @@ GitHub Webhook
     quay.io/ocppe
 ```
 
-## Prerequisites
+## Setup
 
-### AWS Secrets Manager Setup
-
-Create the CI pipeline secrets in AWS Secrets Manager:
+All setup is automated via Ansible. See [ansible/README.md](../../../../ansible/README.md).
 
 ```shell
-# Generate a webhook secret
-WEBHOOK_SECRET=$(openssl rand -hex 20)
+cd ansible
 
-# Create the secret in AWS Secrets Manager
-aws secretsmanager create-secret \
-  --name ocppe/ci-pipelines \
-  --secret-string "{
-    \"github-webhook-secret\": \"${WEBHOOK_SECRET}\",
-    \"quay-username\": \"YOUR_QUAY_USERNAME\",
-    \"quay-password\": \"YOUR_QUAY_ROBOT_TOKEN\",
-    \"git-username\": \"YOUR_GITHUB_USERNAME\",
-    \"git-password\": \"YOUR_GITHUB_PAT\"
-  }"
+# 1. Setup Quay.io (creates org, robot account, repos)
+export QUAY_TOKEN=your_quay_oauth_token
+ansible-playbook playbooks/quay-setup.yml
 
-# Save the webhook secret for GitHub configuration
-echo "GitHub Webhook Secret: ${WEBHOOK_SECRET}"
+# 2. Setup AWS Secrets Manager
+source .quay-credentials.env
+ansible-playbook playbooks/aws-secrets-setup.yml \
+  -e quay_username="${QUAY_USERNAME}" \
+  -e quay_password="${QUAY_PASSWORD}" \
+  -e git_username=YOUR_GITHUB_USERNAME \
+  -e git_password=YOUR_GITHUB_PAT
+
+# 3. Deploy pipelines via ArgoCD (automatic with app-of-apps)
+
+# 4. Setup GitHub webhooks
+ansible-playbook playbooks/github-webhooks-setup.yml
 ```
-
-To update an existing secret:
-
-```shell
-aws secretsmanager put-secret-value \
-  --secret-id ocppe/ci-pipelines \
-  --secret-string "{
-    \"github-webhook-secret\": \"${WEBHOOK_SECRET}\",
-    \"quay-username\": \"YOUR_QUAY_USERNAME\",
-    \"quay-password\": \"YOUR_QUAY_ROBOT_TOKEN\",
-    \"git-username\": \"YOUR_GITHUB_USERNAME\",
-    \"git-password\": \"YOUR_GITHUB_PAT\"
-  }"
-```
-
-### Quay.io Robot Account
-
-1. Log in to [quay.io](https://quay.io)
-2. Create organization `ocppe` (or use existing)
-3. Go to **Organization Settings** → **Robot Accounts**
-4. Create a robot account with write permissions
-5. Use the robot account credentials in the secret above
-
-### GitHub Personal Access Token
-
-Create a PAT with these scopes:
-- `repo` (for private repositories)
-- `read:org` (if using organization repos)
-
-## Supported Application Types
-
-| Type    | Detection              | Build Command                |
-| ------- | ---------------------- | ---------------------------- |
-| Quarkus | pom.xml with quarkus   | ./mvnw package               |
-| Angular | angular.json           | (coming soon)                |
-| Node.js | package.json           | (coming soon)                |
-
-## Setup Instructions
-
-### 1. Create AWS Secrets (see above)
-
-### 2. Deploy via ArgoCD
-
-The pipelines are deployed automatically via ArgoCD when using the app-of-apps pattern.
-
-For manual deployment:
-
-```shell
-oc apply -k cluster-config/pipelines/
-```
-
-### 3. Verify External Secrets
-
-```shell
-# Check ExternalSecret status
-oc get externalsecrets -n ci-pipelines
-
-# Verify secrets were created
-oc get secrets -n ci-pipelines
-```
-
-### 4. Get Webhook URL
-
-```shell
-oc get route github-webhook -n ci-pipelines -o jsonpath='{.spec.host}'
-```
-
-### 5. Configure GitHub Webhook
-
-In your GitHub repository settings:
-
-1. Go to **Settings** → **Webhooks** → **Add webhook**
-2. **Payload URL**: `https://<webhook-route>/`
-3. **Content type**: `application/json` (**IMPORTANT**: Must be `application/json`, NOT `application/x-www-form-urlencoded`)
-4. **Secret**: Use the `WEBHOOK_SECRET` value from AWS setup
-5. **SSL verification**: Enable
-6. **Events**: Select "Just the push event" or choose "Let me select individual events" and check:
-   - Push events (for branch pushes)
-   - Pull requests (for PR builds)
-
-**Common Error**: If you see `invalid character 'p' looking for beginning of value`, the Content-type is wrong. It must be `application/json`.
 
 ## Directory Structure
 
@@ -164,23 +81,25 @@ pipelines/
 │   ├── detect-app-type.yaml  # Detects Quarkus/Angular/Node.js
 │   ├── build-quarkus.yaml    # Maven build
 │   ├── test-quarkus.yaml     # Maven test
-│   ├── build-push-image.yaml # Buildah build and push
-│   └── kustomization.yaml
+│   └── build-push-image.yaml # Buildah build and push
 ├── pipelines/
 │   ├── ci-pipeline.yaml      # Main CI pipeline
-│   ├── quarkus-build-pipeline.yaml
-│   └── kustomization.yaml
-├── triggers/
-│   ├── trigger-binding.yaml  # GitHub payload parsing
-│   ├── trigger-template.yaml # PipelineRun template
-│   ├── event-listener.yaml   # Webhook endpoint
-│   └── kustomization.yaml
-└── kustomization.yaml
+│   └── quarkus-build-pipeline.yaml
+└── triggers/
+    ├── trigger-binding.yaml  # GitHub payload parsing
+    ├── trigger-template.yaml # PipelineRun template
+    └── event-listener.yaml   # Webhook endpoint
 ```
 
-## Manual Pipeline Run
+## Supported Application Types
 
-To manually trigger a pipeline run:
+| Type    | Detection              | Build Command    |
+| ------- | ---------------------- | ---------------- |
+| Quarkus | pom.xml with quarkus   | ./mvnw package   |
+| Angular | angular.json           | (coming soon)    |
+| Node.js | package.json           | (coming soon)    |
+
+## Manual Pipeline Run
 
 ```shell
 cat <<EOF | oc create -f -
@@ -197,18 +116,11 @@ spec:
       value: https://github.com/ocppe/customer-api.git
     - name: git-revision
       value: main
-    - name: image-registry
-      value: quay.io
-    - name: image-repository
-      value: ocppe
-    - name: run-tests
-      value: "true"
   workspaces:
     - name: shared-workspace
       volumeClaimTemplate:
         spec:
-          accessModes:
-            - ReadWriteOnce
+          accessModes: [ReadWriteOnce]
           resources:
             requests:
               storage: 1Gi
@@ -222,14 +134,13 @@ EOF
 ## Viewing Pipeline Runs
 
 ```shell
-# List pipeline runs
+# List runs
 oc get pipelineruns -n ci-pipelines
 
 # View logs
-tkn pipelinerun logs <pipelinerun-name> -n ci-pipelines
+tkn pipelinerun logs <run-name> -n ci-pipelines
 
-# View in OpenShift Console
-# Navigate to Pipelines → PipelineRuns
+# OpenShift Console: Pipelines → PipelineRuns
 ```
 
 ## Troubleshooting
@@ -237,36 +148,26 @@ tkn pipelinerun logs <pipelinerun-name> -n ci-pipelines
 ### External Secrets Not Syncing
 
 ```shell
-# Check ExternalSecret status
 oc describe externalsecret github-webhook-secret -n ci-pipelines
-
-# Check ClusterSecretStore
 oc describe clustersecretstore aws-secrets-manager
 ```
 
 ### Webhook Not Triggering
 
 ```shell
-# Check EventListener logs
 oc logs -l eventlistener=github-webhook-listener -n ci-pipelines
-
-# Verify webhook secret matches
-oc get secret github-webhook-secret -n ci-pipelines -o jsonpath='{.data.webhook-secret}' | base64 -d
 ```
 
-### "Invalid character 'p' looking for beginning of value"
+### "Invalid character 'p'" Error
 
-This error means GitHub is sending the payload as URL-encoded form data instead of JSON.
-
-**Fix**: In GitHub webhook settings, change **Content type** from `application/x-www-form-urlencoded` to `application/json`.
-
-### Webhook Returns 403 Forbidden
-
-The webhook secret doesn't match. Verify:
-
+Content-Type is wrong. Re-run the webhook setup:
 ```shell
-# Get the secret from the cluster
-oc get secret github-webhook-secret -n ci-pipelines -o jsonpath='{.data.webhook-secret}' | base64 -d
+ansible-playbook playbooks/github-webhooks-setup.yml
+```
 
-# Compare with the value in GitHub webhook settings
+### 403 Forbidden on Webhook
+
+Webhook secret mismatch:
+```shell
+oc get secret github-webhook-secret -n ci-pipelines -o jsonpath='{.data.webhook-secret}' | base64 -d
 ```
