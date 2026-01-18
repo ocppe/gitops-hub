@@ -16,7 +16,7 @@ GitOps repository for the OpenShift Platform Engineering hub cluster.
 
 ## Prerequisites
 
-All infrastructure setup is automated via Ansible playbooks in the `ansible/` directory. See [ansible/README.md](../ansible/README.md) for complete instructions.
+All infrastructure setup is automated via Ansible playbooks. See the [ansible README](../ansible/README.md) for complete instructions.
 
 **Required setup before deploying:**
 1. Quay.io organization and robot account: `ansible-playbook playbooks/quay-setup.yml`

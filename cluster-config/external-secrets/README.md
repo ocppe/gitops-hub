@@ -19,7 +19,7 @@ ansible-playbook playbooks/aws-secrets-setup.yml \
   -e git_password=...
 ```
 
-See [ansible/README.md](../../../../ansible/README.md) for complete instructions.
+See the [ansible README](../../../../ansible/README.md) for complete instructions.
 
 ## AWS Secrets Structure
 

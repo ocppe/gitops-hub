@@ -46,7 +46,7 @@ GitHub Webhook
 
 ## Setup
 
-All setup is automated via Ansible. See [ansible/README.md](../../../../ansible/README.md).
+All setup is automated via Ansible. See the [ansible README](../../../../ansible/README.md).
 
 ```shell
 cd ansible

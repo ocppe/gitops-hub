@@ -30,7 +30,7 @@ echo "OAuth Secret: $OAUTH_CLIENT_SECRET"
 # Update kustomization.yaml with this value
 ```
 
-See [ansible/README.md](../../../../ansible/README.md) for complete instructions.
+See the [ansible README](../../../../ansible/README.md) for complete instructions.
 
 ## Configuration
 
