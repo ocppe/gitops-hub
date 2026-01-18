@@ -1,0 +1,38 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: test-quarkus
+  namespace: ci-pipelines
+spec:
+  description: Runs tests for a Quarkus application
+  params:
+    - name: source-dir
+      description: Path to the source code
+      type: string
+      default: "source"
+  workspaces:
+    - name: source
+  results:
+    - name: test-result
+      description: Test result (passed/failed)
+  steps:
+    - name: test
+      image: registry.access.redhat.com/ubi9/openjdk-21:latest
+      workingDir: $(workspaces.source.path)/$(params.source-dir)
+      env:
+        - name: MAVEN_OPTS
+          value: "-Dmaven.repo.local=$(workspaces.source.path)/.m2"
+      script: |
+        #!/usr/bin/env bash
+        set -e
+        
+        echo "Running Quarkus tests..."
+        
+        if ./mvnw test; then
+          echo "Tests passed"
+          echo -n "passed" > $(results.test-result.path)
+        else
+          echo "Tests failed"
+          echo -n "failed" > $(results.test-result.path)
+          exit 1
+        fi

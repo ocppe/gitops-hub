@@ -7,3 +7,4 @@ resources:
   - acs.yaml
   - openshift-pipelines.yaml
   - developer-hub.yaml
+  - pipelines.yaml

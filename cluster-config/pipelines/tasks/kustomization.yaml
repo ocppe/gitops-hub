@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - detect-app-type.yaml
+  - build-quarkus.yaml
+  - test-quarkus.yaml
+  - build-push-image.yaml

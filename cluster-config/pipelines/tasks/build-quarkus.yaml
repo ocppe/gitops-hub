@@ -1,0 +1,53 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: build-quarkus
+  namespace: ci-pipelines
+spec:
+  description: Builds a Quarkus application using Maven
+  params:
+    - name: source-dir
+      description: Path to the source code
+      type: string
+      default: "source"
+    - name: maven-goals
+      description: Maven goals to execute
+      type: array
+      default: ["package", "-DskipTests"]
+    - name: native-build
+      description: Whether to build a native executable
+      type: string
+      default: "false"
+  workspaces:
+    - name: source
+    - name: maven-cache
+      optional: true
+  results:
+    - name: jar-path
+      description: Path to the built JAR file
+  steps:
+    - name: build
+      image: registry.access.redhat.com/ubi9/openjdk-21:latest
+      workingDir: $(workspaces.source.path)/$(params.source-dir)
+      env:
+        - name: MAVEN_OPTS
+          value: "-Dmaven.repo.local=$(workspaces.source.path)/.m2"
+      script: |
+        #!/usr/bin/env bash
+        set -e
+        
+        echo "Building Quarkus application..."
+        
+        if [ "$(params.native-build)" = "true" ]; then
+          ./mvnw package -Dnative -DskipTests
+          JAR_PATH="target/*-runner"
+        else
+          ./mvnw $(params.maven-goals)
+          JAR_PATH=$(find target -name "quarkus-run.jar" | head -1)
+          if [ -z "$JAR_PATH" ]; then
+            JAR_PATH=$(find target -name "*-runner.jar" | head -1)
+          fi
+        fi
+        
+        echo "Build complete. JAR at: $JAR_PATH"
+        echo -n "$JAR_PATH" > $(results.jar-path.path)

@@ -1,0 +1,27 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: github-push-binding
+  namespace: ci-pipelines
+spec:
+  params:
+    - name: git-url
+      value: $(body.repository.clone_url)
+    - name: git-revision
+      value: $(body.ref)
+    - name: git-repo-name
+      value: $(body.repository.name)
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: github-pr-binding
+  namespace: ci-pipelines
+spec:
+  params:
+    - name: git-url
+      value: $(body.pull_request.head.repo.clone_url)
+    - name: git-revision
+      value: $(body.pull_request.head.sha)
+    - name: git-repo-name
+      value: $(body.repository.name)

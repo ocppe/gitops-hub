@@ -14,6 +14,7 @@ This repository manages the following components on the hub cluster:
 | Advanced Cluster Security   | Kubernetes-native security platform         |
 | OpenShift Pipelines         | Tekton-based CI/CD pipelines                |
 | Red Hat Developer Hub       | Internal developer portal (Backstage)       |
+| CI Pipelines                | Centralized build pipelines for apps        |
 
 ## Directory Structure
 
@@ -31,7 +32,12 @@ gitops-hub/
 │   ├── developer-hub-operator/     # RHDH operator subscription
 │   └── developer-hub-instance/     # Backstage instance with OIDC
 ├── cluster-config/
-│   └── external-secrets/           # ClusterSecretStore for AWS
+│   ├── external-secrets/           # ClusterSecretStore for AWS
+│   └── pipelines/                  # CI pipeline configuration
+│       ├── base/                   # Namespace, RBAC, secrets
+│       ├── tasks/                  # Tekton tasks
+│       ├── pipelines/              # Tekton pipelines
+│       └── triggers/               # GitHub webhook triggers
 └── components/                     # Reusable Kustomize components
 ```
 
@@ -68,6 +74,22 @@ patches:
       - op: replace
         path: /secret
         value: <OAUTH_SECRET from above>
+```
+
+### Configure CI Pipeline Secrets
+
+Update `cluster-config/pipelines/base/secrets.yaml` with your credentials:
+
+```yaml
+# GitHub webhook secret - generate with: openssl rand -hex 20
+webhook-secret: "<your-webhook-secret>"
+
+# Quay.io credentials - generate with: echo -n 'username:token' | base64
+auth: "<base64-encoded-credentials>"
+
+# GitHub credentials for cloning private repos
+username: "<github-username>"
+password: "<github-pat>"
 ```
 
 ## Bootstrap Instructions
@@ -127,6 +149,77 @@ oc get route openshift-gitops-server -n openshift-gitops -o jsonpath='{.spec.hos
 
 # Get the admin password
 oc extract secret/openshift-gitops-cluster -n openshift-gitops --to=-
+```
+
+## CI Pipelines Setup
+
+### 1. Get the Webhook URL
+
+After the pipelines are deployed:
+
+```shell
+oc get route github-webhook -n ci-pipelines -o jsonpath='{.spec.host}'
+```
+
+### 2. Configure GitHub Webhooks
+
+For each repository (customer-api, product-api, order-api):
+
+1. Go to **Settings** → **Webhooks** → **Add webhook**
+2. **Payload URL**: `https://<webhook-route-from-above>/`
+3. **Content type**: `application/json`
+4. **Secret**: Same value as `webhook-secret` in secrets.yaml
+5. **Events**: Select "Just the push event" or "Pull requests"
+
+### 3. Supported Application Types
+
+| Type    | Detection            | Build                    | Image Location              |
+| ------- | -------------------- | ------------------------ | --------------------------- |
+| Quarkus | pom.xml with quarkus | Maven package            | quay.io/ocppe/<app-name>    |
+| Angular | angular.json         | (coming soon)            | quay.io/ocppe/<app-name>    |
+| Node.js | package.json         | (coming soon)            | quay.io/ocppe/<app-name>    |
+
+### 4. Manual Pipeline Run
+
+```shell
+cat <<EOF | oc create -f -
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: ci-pipeline-manual-
+  namespace: ci-pipelines
+spec:
+  pipelineRef:
+    name: ci-pipeline
+  params:
+    - name: git-url
+      value: https://github.com/ocppe/customer-api.git
+    - name: git-revision
+      value: main
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+    - name: dockerconfig
+      secret:
+        secretName: quay-credentials
+  serviceAccountName: pipeline-sa
+EOF
+```
+
+### 5. View Pipeline Runs
+
+```shell
+# List runs
+oc get pipelineruns -n ci-pipelines
+
+# View logs (requires tkn CLI)
+tkn pipelinerun logs <run-name> -n ci-pipelines
 ```
 
 ## External Secrets IAM Configuration
@@ -231,4 +324,7 @@ oc apply -k operators/openshift-pipelines/
 oc apply -k operators/developer-hub-operator/
 # Wait for CRD, then:
 oc apply -k operators/developer-hub-instance/
+
+# Deploy CI Pipelines
+oc apply -k cluster-config/pipelines/
 ```

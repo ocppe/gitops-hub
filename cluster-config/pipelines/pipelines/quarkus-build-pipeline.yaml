@@ -1,0 +1,110 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: quarkus-build-pipeline
+  namespace: ci-pipelines
+spec:
+  description: Build, test, and push a Quarkus application
+  params:
+    - name: git-url
+      description: Git repository URL
+      type: string
+    - name: git-revision
+      description: Git revision (branch, tag, or commit)
+      type: string
+      default: "main"
+    - name: image-registry
+      description: Container registry
+      type: string
+      default: "quay.io"
+    - name: image-repository
+      description: Image repository
+      type: string
+      default: "ocppe"
+    - name: run-tests
+      description: Whether to run tests
+      type: string
+      default: "true"
+  workspaces:
+    - name: shared-workspace
+    - name: dockerconfig
+  tasks:
+    - name: git-clone
+      taskRef:
+        name: git-clone
+        kind: ClusterTask
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+        - name: subdirectory
+          value: source
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+
+    - name: detect-app-type
+      taskRef:
+        name: detect-app-type
+      runAfter:
+        - git-clone
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: run-tests
+      taskRef:
+        name: test-quarkus
+      runAfter:
+        - detect-app-type
+      when:
+        - input: $(params.run-tests)
+          operator: in
+          values: ["true"]
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: build-app
+      taskRef:
+        name: build-quarkus
+      runAfter:
+        - run-tests
+      params:
+        - name: maven-goals
+          value: ["package", "-DskipTests"]
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: build-push-image
+      taskRef:
+        name: build-push-image
+      runAfter:
+        - build-app
+      params:
+        - name: image-registry
+          value: $(params.image-registry)
+        - name: image-repository
+          value: $(params.image-repository)
+        - name: image-name
+          value: $(tasks.detect-app-type.results.app-name)
+        - name: image-tag
+          value: $(params.git-revision)-$(tasks.git-clone.results.commit)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+        - name: dockerconfig
+          workspace: dockerconfig
+
+  results:
+    - name: app-name
+      description: Application name
+      value: $(tasks.detect-app-type.results.app-name)
+    - name: app-version
+      description: Application version
+      value: $(tasks.detect-app-type.results.app-version)
+    - name: image-url
+      description: Built image URL
+      value: $(tasks.build-push-image.results.image-url)
